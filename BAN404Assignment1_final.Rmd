@@ -1,0 +1,656 @@
+---
+title: "BAN404Assignment1"
+author: "Group8"
+date: ''
+output:
+  html_document:
+    df_print: paged
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+#install.packages("wooldridge")
+library(wooldridge)
+#install.packages("usdm")
+library(usdm)
+#install.packages("corrplot")
+library(corrplot)
+#install.packages("mctest")
+library(mctest)
+library(leaps)
+library(glmnet)
+library(MASS)
+library(stats)
+```
+
+## a. Describe relevant features of the input and output variables with descriptive statistics.
+
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+summary(ceosal2)
+names(ceosal2)
+?ceosal2
+par(mfrow=c(1,2))
+hist(ceosal2$salary)
+hist(ceosal2$lsalary)
+par(mfrow=c(1,2))
+hist(ceosal2$sales)
+hist(ceosal2$lsales)
+par(mfrow=c(1,2))
+hist(ceosal2$mktval)
+hist(ceosal2$lmktval)
+```
+
+### test collinearity
+
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+df=ceosal2[,-1]
+vif(df)
+corrplot.mixed(cor(df))
+
+df2=ceosal2[,-c(1,7,8,9,13,14)]
+vif(df2)
+```
+
+### outlier
+
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+#identify Outliers
+sumfit <- summary(lm(lsalary~.,data = ceosal2[,-1]))
+sumfit$sigma
+par(mfrow=c(2,2))
+plot(lm(lsalary~.,data = ceosal2[,-1]))
+sumfit <- summary(lm(lsalary~.,data = ceosal2[-103,-1]))
+sumfit$sigma
+
+# remove outlier
+df2=ceosal2[-103,-c(1,7,8,9,13,14)]
+df=ceosal2[-103,-1]
+```
+
+## b. Use different methods to predict salary. 
+
+### 1. Standard linear regression 
+
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+set.seed(1)
+train=sample(c(TRUE,FALSE), nrow(df2),rep=TRUE)
+test=(!train)
+
+MSE.VSA=data.frame(ols=0,best=0,forward=0,backward=0,lasso=0,ridge=0)
+MSE.VSA2=data.frame(ols=0,best=0,forward=0,backward=0,lasso=0,ridge=0)
+
+# standard linear regression on all of the predictors
+pred=predict(lm(lsalary~.,data = df[train,]),newdata=df[test,])
+MSE.VSA[,"ols"]<-mean((df$lsalary[test]-pred)^2) 
+lm.all=lm(lsalary~.,data = df)
+summary(lm.all)
+
+# standard linear regression on a subset of predictors
+pred=predict(lm(lsalary~.,data = df2[train,]),newdata=df2[test,])
+MSE.VSA2[,"ols"]<-mean((df2$lsalary[test]-pred)^2) 
+lm.sub=lm(lsalary~.,data = df2)
+summary(lm.sub)
+```
+
+### 2. Subset selection
+
+#### (1) best subset
+
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+# use all predictors
+nv=ncol(df)-1
+test.mat=model.matrix(lsalary~.,data=df[test,])
+val.errors=rep(NA,nv)
+for(i in 1:nv){
+  coefi=coef(regsubsets(lsalary~.,data=df[train,],nvmax=nv),id=i) 
+  pred=test.mat[,names(coefi)]%*%coefi
+  val.errors[i]=mean((df$lsalary[test]-pred)^2) 
+}
+MSE.VSA[,"best"]<-min(val.errors)
+which.min(val.errors)
+regfit.best=regsubsets(lsalary~.,data=df,nvmax = nv)
+summary(regfit.best)
+coef(regfit.best,1)
+
+# use our chosen subset of predictors
+test.mat=model.matrix(lsalary~.,data=df2[test,])
+val.errors=rep(NA,8)
+for(i in 1:8){
+  coefi=coef(regsubsets(lsalary~.,data=df2[train,]),id=i) 
+  pred=test.mat[,names(coefi)]%*%coefi
+  val.errors[i]=mean((df2$lsalary[test]-pred)^2) 
+}
+MSE.VSA2[,"best"]<-min(val.errors)
+which.min(val.errors)
+regfit.best2=regsubsets(lsalary~.,data=df2)
+coef(regfit.best2,2)
+```
+
+#### (2) forward stepwise
+
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+# use all predictors
+test.mat=model.matrix(lsalary~.,data=df[test,])
+val.errors=rep(NA,nv)
+for(i in 1:nv){
+  coefi=coef(regsubsets(lsalary~.,data=df[train,],nvmax=nv,method = "forward"),id=i) 
+  pred=test.mat[,names(coefi)]%*%coefi
+  val.errors[i]=mean((df$lsalary[test]-pred)^2) 
+}
+MSE.VSA[,"forward"]<-min(val.errors)
+which.min(val.errors)
+regfit.fwd=regsubsets(lsalary~.,data=df,nvmax = nv,method = "forward")
+summary(regfit.fwd)
+coef(regfit.fwd,1)
+
+# use our chosen subset of predictors
+test.mat=model.matrix(lsalary~.,data=df2[test,])
+val.errors=rep(NA,8)
+for(i in 1:8){
+  coefi=coef(regsubsets(lsalary~.,data=df2[train,],method = "forward"),id=i) 
+  pred=test.mat[,names(coefi)]%*%coefi
+  val.errors[i]=mean((df2$lsalary[test]-pred)^2) 
+}
+MSE.VSA2[,"forward"]<-min(val.errors)
+which.min(val.errors)
+regfit.fwd2=regsubsets(lsalary~.,data=df2,method = "forward")
+coef(regfit.fwd2,2)
+```
+
+#### (3) backward stepwise
+
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+# use all predictors
+test.mat=model.matrix(lsalary~.,data=df[test,])
+val.errors=rep(NA,nv)
+for(i in 1:nv){
+  coefi=coef(regsubsets(lsalary~.,data=df[train,],nvmax=nv,method = "backward"),id=i) 
+  pred=test.mat[,names(coefi)]%*%coefi
+  val.errors[i]=mean((df$lsalary[test]-pred)^2) 
+}
+MSE.VSA[,"backward"]<-min(val.errors)
+which.min(val.errors)
+regfit.bwd=regsubsets(lsalary~.,data=df,nvmax = nv,method = "backward")
+summary(regfit.bwd)
+coef(regfit.bwd,1)
+
+# use subset of predictors
+test.mat=model.matrix(lsalary~.,data=df2[test,])
+val.errors=rep(NA,8)
+for(i in 1:8){
+  coefi=coef(regsubsets(lsalary~.,data=df2[train,],method = "backward"),id=i) 
+  pred=test.mat[,names(coefi)]%*%coefi
+  val.errors[i]=mean((df2$lsalary[test]-pred)^2) 
+}
+MSE.VSA2[,"backward"]<-min(val.errors)
+which.min(val.errors)
+regfit.bwd2=regsubsets(lsalary~.,data=df2,method = "backward")
+coef(regfit.bwd2,2)
+```
+
+
+### 3. Lasso
+
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+# use all predictors
+x=model.matrix(lsalary~.,df)[,-1]
+y=as.matrix(df$lsalary)
+bestlam=cv.glmnet(x[train,],y[train],alpha=1)$lambda.min
+bestlam
+lasso.pred=predict(glmnet(x[train,],y[train],alpha=1,lambda=bestlam),newx=x[test,])
+MSE.VSA[,"lasso"]<-mean((lasso.pred-y[test])^2)
+reg.lasso=glmnet(x,y,alpha=1,lambda=bestlam)
+lasso.coef=predict(reg.lasso,type="coefficients",s=bestlam)[1:14,]
+lasso.coef[lasso.coef!=0]
+
+# use our chosen subset of predictors
+x2=model.matrix(lsalary~.,df2)[,-1]
+y2=as.matrix(df2$lsalary)
+bestlam=cv.glmnet(x2[train,],y2[train],alpha=1)$lambda.min
+bestlam
+lasso.pred=predict(glmnet(x2[train,],y2[train],alpha=1,lambda=bestlam),newx=x2[test,])
+MSE.VSA2[,"lasso"]<-mean((lasso.pred-y2[test])^2)
+reg.lasso2=glmnet(x2,y2,alpha=1,lambda=bestlam)
+lasso.coef=predict(reg.lasso2,type="coefficients",s=bestlam)[1:9,]
+lasso.coef[lasso.coef!=0]
+```
+
+### 4. Ridge regression
+
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+# use all predictors
+bestlam=cv.glmnet(x[train,],y[train],alpha=0)$lambda.min
+ridge.pred=predict(glmnet(x[train,],y[train],alpha=0,lambda=bestlam),newx=x[test,])
+MSE.VSA[,"ridge"]<-mean((ridge.pred-y[test])^2)
+reg.ridge=glmnet(x,y,alpha=0,lambda=bestlam)
+coef1<-cbind(coef(lm.all),coef(reg.ridge))
+colnames(coef1)<-c("ols", "ridge")
+coef1
+
+# use subset predictors
+bestlam=cv.glmnet(x2[train,],y2[train],alpha=0)$lambda.min
+ridge.pred=predict(glmnet(x2[train,],y2[train],alpha=0,lambda=bestlam),newx=x2[test,])
+MSE.VSA2[,"ridge" ]<-mean((ridge.pred-y2[test])^2)
+reg.ridge2=glmnet(x2,y2,alpha=0,lambda=bestlam)
+coef2<-cbind(coef(lm.sub),coef(reg.ridge2))
+colnames(coef2)<-c("ols", "ridge")
+coef2
+```
+
+## c. Evaluate the predictions with at least one of the methods
+
+### 1. the validation set approach
+
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+MSE.VSA
+MSE.VSA2
+```
+
+### 2. K-fold cross-validation
+
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+testERR=data.frame(ols=0,best=0,forward=0,backward=0,lasso=0,ridge=0)
+library(gam)
+MSE<-function(testERR,K){
+  n<-length(df$lsalary)
+  foldsize<-floor(n/K)
+  kk<-1
+  for (i in 1:K){
+    fold=kk:(kk+foldsize-1) #initial 50 fold
+    kk<-kk+foldsize # loop next fold
+    
+    train<-df[-fold,]
+    test<-df[fold,]
+    
+    # ****************** OLS  ++++++++++++++++++++++
+    ols<-lm(lsalary~., data = train)
+    pred.ols<-predict(ols, newdata = test)
+    testERR[fold,"ols"]<-as.matrix(test["lsalary"])-pred.ols
+    
+    # ****************** BESTSUBSET SELECTION  ++++++++++++++++++++++
+    
+    #best.reg<-regsubsets(lsalary~.,data=train,nvmax=14)
+    # lsalary and lsales
+    regbest=lm(lsalary~lsales,data = df[-fold,])
+    pred.best=predict(regbest,newdata=test[,9:11])
+    testERR[fold,"best"]<-as.matrix(test["lsalary"])-pred.best
+    
+    # ****************** FORWARD STEPWISE  ++++++++++++++++++++++
+    #f.reg<-regsubsets(lsalary~., data=train,method="forward", nvmax=14)
+    reg.f.best<-lm(lsalary~lsales , data=df[-fold,])
+    pred.f<-predict(reg.f.best, newdata=test[,9:11])
+    testERR[fold, "forward"]<-as.matrix(test["lsalary"])-pred.f
+    
+    # ****************** BACKWARD STEPWISE  ++++++++++++++++++++++
+    #back.reg<-regsubsets(lsalary~., data=train,method="backward", nvmax=14)
+    
+    reg.b.best<-lm(lsalary~lsales , data=df[-fold,] )
+    pred.back<-predict(reg.b.best, newdata=test[,9:11])
+    testERR[fold, "backward"]<-as.matrix(test["lsalary"])-pred.back
+    
+    # ****************** LASSO  ++++++++++++++++++++++
+    lasso<-lm(lsalary~lsales+lmktval, data=train)
+    pred.lasso<-predict(lasso,newdata=test[,9:11])
+    testERR[fold,"lasso"]<-as.matrix(test["lsalary"])-pred.lasso
+    
+    # ****************** RIDGE  ++++++++++++++++++++++
+    Xtrain=as.matrix(train[,-9])
+    ytrain=as.matrix(train[,9])
+    Xtest=as.matrix(test[,-9])
+    ytest=as.matrix(test[,9])
+    lambdamin.ridge=cv.glmnet(Xtrain,ytrain,alpha=0)
+    lambdamin.ridge<-lambdamin.ridge$lambda.min
+    ridgebest=glmnet(Xtrain,ytrain,family="gaussian",alpha=0,lambda=lambdamin.ridge,standardize=TRUE)
+    predridge=predict(ridgebest,s=lambdamin.ridge, newx=Xtest)
+    testERR[fold,"ridge"]<-as.matrix(test["lsalary"])-predridge
+  }
+  mse<-sapply(testERR, function(x) mean(x^2))
+  return(mse)
+}
+
+MSE(testERR,K=15)
+```
+
+### 3. subset
+
+```{r}
+s.testERR=data.frame(ols=0,best=0,forward=0,backward=0,lasso=0,ridge=0)
+
+MSE_subset<-function(s.testERR,K){
+  n<-length(df2$lsalary)
+  foldsize<-floor(n/K)
+  kk<-1
+  for (i in 1:K){
+    fold=kk:(kk+foldsize-1) #initial 50 fold
+    kk<-kk+foldsize # loop next fold
+    
+    train<-df2[-fold,]
+    test<-df2[fold,]
+    
+    # ****************** OLS  ++++++++++++++++++++++
+    ols<-lm(lsalary~., data = train)
+    pred.ols<-predict(ols, newdata = test)
+    s.testERR[fold,"ols"]<-as.matrix(test["lsalary"])-pred.ols
+    
+    # ****************** BESTSUBSET SELECTION  ++++++++++++++++++++++
+    
+    #best.reg<-regsubsets(lsalary~.,data=train,nvmax=14)
+    regbest=lm(lsalary~comten+lsales,data = df2[-fold,])
+    pred.best=predict(regbest,newdata=test[,c(4,6,7)])
+    s.testERR[fold,"best"]<-as.matrix(test["lsalary"])-pred.best
+    
+    # ****************** FORWARD STEPWISE  ++++++++++++++++++++++
+    #f.reg<-regsubsets(lsalary~., data=train,method="forward", nvmax=14)
+    reg.f.best<-lm(lsalary~comten+lsales , data=df2[-fold,])
+    pred.f<-predict(reg.f.best, newdata=test[,c(4,6,7)])
+    s.testERR[fold, "forward"]<-as.matrix(test["lsalary"])-pred.f
+    
+    # ****************** BACKWARD STEPWISE  ++++++++++++++++++++++
+    #back.reg<-regsubsets(lsalary~., data=train,method="backward", nvmax=14)
+    reg.b.best<-lm(lsalary~comten+lsales , data=df2[-fold,] )
+    pred.back<-predict(reg.b.best, newdata=test[, c(4,6,7)])
+    s.testERR[fold, "backward"]<-as.matrix(test["lsalary"])-pred.back
+    
+    # ****************** LASSO  ++++++++++++++++++++++
+    lasso<-lm(lsalary~lsales+lmktval, data=train)
+    pred.lasso<-predict(lasso, newdata=test[,6:8])
+    s.testERR[fold,"lasso"]<-as.matrix(test["lsalary"])-pred.lasso
+    
+    # ****************** RIDGE  ++++++++++++++++++++++
+    Xtrain=as.matrix(train[,-6])
+    ytrain=as.matrix(train[,6])
+    Xtest=as.matrix(test[,-6]) # exclude lsalary
+    ytest=as.matrix(test[,6]) # include only lsalary
+    lambdamin.ridge=cv.glmnet(Xtrain,ytrain,alpha=0)
+    lambdamin.ridge<-lambdamin.ridge$lambda.min
+    ridgebest=glmnet(Xtrain,ytrain,family="gaussian",alpha=0,lambda=lambdamin.ridge,standardize=TRUE)
+    predridge=predict(ridgebest,s=lambdamin.ridge, newx=Xtest)
+    s.testERR[fold,"ridge"]<-as.matrix(test["lsalary"])-predridge
+  }
+  mse<-sapply(s.testERR, function(x) mean(x^2))
+  return(mse)
+}
+
+MSE_subset(s.testERR,K=10)
+```
+
+### 4. leave-one-out cross-validation
+
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+n<-nrow(df)
+MSE(testERR,K=n) 
+MSE_subset(s.testERR,K=n)
+```
+
+
+## d. Choose an additional prediction method and compare with the other methods.
+
+### 1. Ploynomial
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+
+attach(df)
+
+set.seed(1)
+train=sample(c(TRUE,FALSE), nrow(df),rep=TRUE)
+test=(!train)
+
+# simple poly to pick variables
+
+# ran the poly, and found power to 3
+fit.age = lm(lsalary ~ poly(age, 4), data=df[train,])
+summary(fit.age)
+# age 0.3359888
+pred.age=predict(lm(lsalary ~ poly(age, 2), data = df[train,]), newdata=df[test,])
+mean((df$lsalary[test]-pred.age)^2)
+
+# no power
+fit.comten = lm(lsalary ~ poly(comten, 4), data=df[train,])
+summary(fit.comten)
+# comten 0.3491408
+pred.comten=predict(lm(lsalary ~ poly(comten, 2), data = df[train,]), newdata=df[test,])
+# power to 1, mse 0.342114
+mean((df[test,]$lsalary-pred.comten)^2)
+
+# power to 3
+fit.ceoten = lm(lsalary ~ poly (ceoten, 4), data=df[train,])
+summary(fit.ceoten)
+# ceoten  0.3378272
+pred.ceoten=predict(lm(lsalary ~ poly(ceoten, 2), data = df[train,]), newdata=df[test,])
+mean((df$lsalary[test]-pred.ceoten)^2)
+
+#power to 1 
+fit.lsales = lm(lsalary ~ poly (lsales, 4), data=df[train,])
+summary(fit.lsales)
+# lsales 0.2458247
+pred.lsales=predict(lm(lsalary ~ poly(lsales, 4), data = df[train,]), newdata=df[test,])
+# power to 1, mse 0.2436412
+mean((df$lsalary[test]-pred.lsales)^2)
+
+# power to 1
+fit.lmktval = lm(lsalary ~ poly (lmktval, 4), data=df[train,])
+summary(fit.lmktval)
+# lmktval 0.2730573
+pred.lmktval=predict(lm(lsalary ~ poly(lmktval, 2), data = df[train,]), newdata=df[test,])
+# power to 1, mse 0.2523584
+mean((df$lsalary[test]-pred.lmktval)^2) 
+
+# power to 2 
+fit.profmarg = lm(lsalary ~ poly (profmarg, 4), data=df[train,])
+summary(fit.profmarg)
+# profmarg 0.3373038
+pred.profmarg=predict(lm(lsalary ~ poly(profmarg, 2), data = df[train,]), newdata=df[test,])
+mean((df$lsalary[test]-pred.profmarg)^2) 
+
+# regress on all variables 
+# power suggested by significance
+fit.all=lm(lsalary ~ college + grad + poly(age, 3) + poly(ceoten, 3) + poly(lsales, 1) + poly(lmktval, 1) + poly(profmarg, 2), data=df[train,])
+sum.all = summary(fit.all)
+sum.all
+coef(sum.all)
+pred.all=predict(fit.all, newdata=df[test,])
+mean((df$lsalary[test]-pred.all)^2)
+
+# regress without dummies
+# power suggested by significance
+fit.nodum = lm(lsalary ~ poly(age, 3) + poly(ceoten, 3) + poly(lsales, 1) + poly(lmktval, 1) + poly(profmarg, 2), data = df[train,])
+sum.nodum = summary(fit.nodum)
+sum.nodum
+coef(sum.nodum)
+pred.nodum=predict(fit.nodum, data = df[train,], newdata=df[test,])
+mean((df$lsalary[test]-pred.nodum)^2) 
+```
+
+### 2. Smoothing spline
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+require(splines)
+
+# standard error band for spline prep
+#age
+agelims=range(age)
+age.grid=seq(from=agelims[1], to=agelims[2])
+preds.age=predict(fit.age, newdata=list(age=age.grid), se=TRUE)
+se.bands=cbind(preds.age$fit+2*preds.age$se.fit, preds.age$fit-2*preds.age$se.fit)
+
+# comten
+comtenlims = range(comten)
+comten.grid = seq(from = comtenlims[1], to = comtenlims[2])
+preds.comten = predict(fit.comten, newdata = list(comten=comten.grid), se=TRUE)
+se.bands=cbind(preds.comten$fit+2*preds.comten$se.fit, preds.comten$fit - 2*preds.comten$se.fit)
+
+# ceoten
+ceotenlims = range(ceoten)
+ceoten.grid = seq(from = ceotenlims[1], to = ceotenlims[2])
+preds.ceoten = predict(fit.ceoten, newdata = list(ceoten=ceoten.grid), se=TRUE)
+se.bands=cbind(preds.ceoten$fit+2*preds.ceoten$se.fit, preds.ceoten$fit - 2*preds.ceoten$se.fit)
+
+#lsales
+lsaleslims = range(lsales)
+lsales.grid = seq(from = lsaleslims[1], to = lsaleslims[2])
+preds.lsales = predict(fit.lsales, newdata = list(lsales=lsales.grid), se=TRUE)
+se.bands=cbind(preds.lsales$fit+2*preds.lsales$se.fit, preds.lsales$fit - 2*preds.lsales$se.fit)
+
+# lmktval
+lmktvallims = range(lmktval)
+lmktval.grid = seq(from = lmktvallims[1], to = lmktvallims[2])
+preds.lmktval = predict(fit.lmktval, newdata = list(lmktval=lmktval.grid), se=TRUE)
+se.bands=cbind(preds.lmktval$fit+2*preds.lmktval$se.fit, preds.lmktval$fit - 2*preds.lmktval$se.fit )
+
+# profmarg
+profmarglims = range(profmarg)
+profmarg.grid = seq(from = profmarglims[1], to = profmarglims[2])
+preds.profmarg = predict(fit.profmarg, newdata = list(profmarg=profmarg.grid), se=TRUE)
+se.bands=c(preds.profmarg$fit+2*preds.profmarg$se.fit, preds.profmarg$fit - 2*preds.profmarg$se.fit )
+
+# smoothing spline on age
+plot(age, lsalary, xlim=agelims, cex=.5, col="darkgrey")
+# i forgot what happens to df
+fit.agedf = smooth.spline(age, lsalary, df=10) 
+fit.agedf
+fit.agecv = smooth.spline(age, lsalary, cv=TRUE)
+fit.agecv
+fit.agecv$df
+
+pred.s.age <- predict(smooth.spline(df[train,]$age, df[train,]$lsalary, cv=TRUE), newdata=df[test,])
+mean((df$lsalary[test]-pred.s.age$y)^2)
+
+lines(fit.agedf, col="red", lwd=2)
+lines(fit.agecv, col="blue",lwd=2)
+legend("topright",legend=c("10 DF","4.28 DF"),
+col=c("red","blue"),lty=1,lwd=2,cex=.8)
+
+# smoothing spline on comten
+plot(comten, lsalary, xlim=comtenlims, cex=.5, col="darkgrey")
+fit.comtendf = smooth.spline(comten, lsalary, df=10) 
+fit.comtendf
+fit.comtencv = smooth.spline(comten, lsalary, cv=TRUE)
+fit.comtencv
+fit.comtencv$df
+
+pred.s.comten <- predict(smooth.spline(df[train,]$comten, df[train,]$lsalary, cv=TRUE), newdata=df[test,])
+mean((df$lsalary[test]-pred.s.comten$y)^2)
+
+lines(fit.comtendf, col="red", lwd=2)
+lines(fit.comtencv, col="blue",lwd=2)
+legend("topright",legend=c("10 DF","2.62 DF"),
+col=c("red","blue"),lty=1,lwd=2,cex=.8)
+
+# smoothing spline on ceoten
+plot(ceoten, lsalary, xlim=ceotenlims, cex=.5, col="darkgrey")
+fit.ceotendf = smooth.spline(ceoten, lsalary, df=10) 
+fit.ceotendf
+fit.ceotencv = smooth.spline(ceoten, lsalary, cv=TRUE)
+fit.ceotencv
+fit.ceotencv$df
+
+pred.s.ceoten <- predict(smooth.spline(df[train,]$ceoten, df[train,]$lsalary, cv=TRUE), newdata=df[test,])
+mean((df$lsalary[test]-pred.s.ceoten$y)^2)
+
+lines(fit.ceotendf, col="red", lwd=2)
+lines(fit.ceotencv, col="blue",lwd=2)
+legend("topright",legend=c("10 DF","2.95 DF"),
+col=c("red","blue"),lty=1,lwd=2,cex=.8)
+
+# smoothing spline on lsales
+plot(lsales, lsalary, xlim=lsaleslims, cex=.5, col="lightgrey")
+fit.lsalesdf = smooth.spline(lsales, lsalary, df=10)
+fit.lsalesdf
+fit.lsalescv = smooth.spline(lsales, lsalary, cv=TRUE)
+fit.lsalescv
+fit.lsalescv$df
+
+pred.s.lsales <- predict(smooth.spline(df[train,]$lsales, df[train,]$lsalary, cv=TRUE), newdata=df[test,])
+mean((df$lsalary[test]-pred.s.lsales$y)^2)
+
+lines(fit.lsalesdf, col="red", lwd=2)
+lines(fit.lsalescv, col="blue",lwd=2)
+legend("topright",legend=c("10 DF","2.02 DF"),
+col=c("red","blue"),lty=1,lwd=2,cex=.8)
+
+# smoothing spline on lmktval
+plot(lmktval, lsalary, xlim=lmktvallims, cex=.5, col="lightgrey")
+fit.lmktvaldf = smooth.spline(lmktval, lsalary, df=10) # i forgot what happens to df
+fit.lmktvaldf
+fit.lmktvalcv = smooth.spline(lmktval, lsalary, cv=TRUE)
+fit.lmktvalcv
+fit.lmktvalcv$df
+
+pred.s.lmktval <- predict(smooth.spline(df[train,]$lmktval, df[train,]$lsalary, cv=TRUE), newdata=df[test,])
+mean((df$lsalary[test]-pred.s.lmktval$y)^2)
+
+lines(fit.lmktvaldf, col="red", lwd=2)
+lines(fit.lmktvalcv, col="blue",lwd=2)
+legend("topright",legend=c("10 DF","3.77 DF"),
+col=c("red","blue"),lty=1,lwd=2,cex=.8)
+
+# smoothing spline on profmarg
+plot(profmarg, lsalary, xlim=profmarglims, cex=.5, col="darkgrey")
+fit.profmargdf = smooth.spline(profmarg, lsalary, df=10) # i forgot what happens to df
+fit.profmargdf
+fit.profmarglimscv = smooth.spline(profmarg, lsalary, cv=TRUE)
+fit.profmarglimscv
+fit.profmarglimscv$df
+
+pred.s.profmarg <- predict(smooth.spline(df[train,]$profmarg, df[train,]$lsalary, cv=TRUE), newdata=df[test,])
+mean((df$lsalary[test]-pred.s.profmarg$y)^2)
+
+lines(fit.profmargdf, col="red", lwd=2)
+lines(fit.profmarglimscv, col="blue",lwd=2)
+legend("topright",legend=c("10 DF","5.9 DF"),
+col=c("red","blue"),lty=1,lwd=2,cex=.8)
+```
+
+### 3. General Additive Model (GAM)
+
+```{r, eval=TRUE, echo=FALSE, warning=FALSE, error=FALSE}
+library(gam)
+
+# with natrual spline
+# variables favoured by poly model
+gam.poly = gam(lsalary ~ ns(age) + ns(ceoten) + ns(profmarg) + lsales + lmktval, data=df[train,])
+gam.poly
+pred.poly.ns = predict(gam.poly, newdata= df[test,])
+# 0.2629036
+mean((df[test,]$lsalary-pred.poly.ns)^2)
+
+# variables favoured by linear model
+gam.lin = gam(lsalary ~ ns(lsales) + ns(comten) + ns(lmktval) + ns(profmarg), data=df[train,])
+gam.lin
+pred.lin.ns = predict(gam.lin, newdata= df[test,])
+# 0.2292431
+mean((df[test,]$lsalary-pred.lin.ns)^2)
+
+# with basic spline 
+# poly 
+gam.poly.s = gam(lsalary ~ s(age) + s(ceoten) + s(profmarg) + lsales + lmktval, data=df[train,])
+gam.poly.s
+pred.poly.s = predict(gam.poly.s, newdata= df[test,])
+# 0.4149405
+mean((df[test,]$lsalary-pred.poly.s)^2)
+
+# linear
+gam.lin.s = gam(lsalary ~ s(lsales) + s(comten) + s(lmktval), data=df[train,])
+gam.lin.s
+pred.lin.s = predict(gam.lin.s, newdata= df[test,])
+# 0.2664959
+mean((df[test,]$lsalary-pred.lin.s)^2)
+```
+
+## e. Summarize your results in a conclusion.
